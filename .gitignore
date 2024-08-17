@@ -4,7 +4,7 @@ __pycache__/
 # Project folders
 *.csv
 *.log
-data/
+/data/
 logs/
 notebooks/
 .hydra/
