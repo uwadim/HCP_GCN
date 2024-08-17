@@ -78,25 +78,48 @@ class HCPDataset(Dataset):
         return []
 
     @property
-    def raw_file_names(self):
-        try:
-            if Path(self.raw_dir).exists():
-                return sorted([f.name for f in Path(self.raw_dir).glob(f'*{self.cfg.data.coding_type}*')])
+    def raw_file_names(self) -> List[str]:
+        """
+        Возвращает список имен файлов в каталоге raw_dir.
+
+        Если каталог raw_dir существует, возвращает отсортированный список имен файлов,
+        соответствующих типу кодирования self.cfg.data.coding_type.
+        В противном случае возвращает пустой список.
+
+        Returns
+        -------
+        List[str]
+            Список имен файлов.
+        """
+        if not hasattr(self, 'raw_dir'):
             return []
-        except AttributeError:
+
+        raw_dir = Path(self.raw_dir)
+        if not raw_dir.exists():
             return []
+
+        return sorted([f.name for f in raw_dir.glob(f'*{self.cfg.data.coding_type}*')])
 
     @property
     def processed_file_names(self):
-        """ return list of files should be in processed dir, if found - skip processing."""
-        try:
-            if Path(self.processed_dir).exists():
-                if self.is_test:
-                    return sorted([f.name for f in Path(self.processed_dir).glob('data_test*.pt')])
-                return sorted([f.name for f in Path(self.processed_dir).glob('data_[!test]*.pt')])
+        """
+        Возвращает список обработанных файлов, которые должны находиться в каталоге processed_dir.
+        Если файлы найдены, то обработка пропускается.
+
+        Returns
+        -------
+        List[str]
+            Список имен файлов в каталоге processed_dir, отсортированный для одинакового порядка при разных запусках.
+        """
+        if not hasattr(self, 'processed_dir'):
             return []
-        except AttributeError:
+
+        processed_dir = Path(self.processed_dir)
+        if not processed_dir.exists():
             return []
+
+        pattern = 'data_test*.pt' if self.is_test else 'data_[!test]*.pt'
+        return sorted([f.name for f in processed_dir.glob(pattern)])
 
     def download(self) -> None:
         # Распаковываем архив, как есть d self.raw_dir
@@ -111,7 +134,7 @@ class HCPDataset(Dataset):
             if p.is_dir():
                 shutil.rmtree(p)
 
-    def process(self):
+    def process(self) -> None:
         for fpath in self.raw_paths:
             # Разбиваем имя файла по символу "_"
             # в предположении, что имя файла должно иметь вид: [id]_[coding_type]_[label]
@@ -133,15 +156,12 @@ class HCPDataset(Dataset):
             if self.is_test:
                 if int(graph_id) in self.cfg.data.test_ids:
                     torch.save(data_to_save, os.path.join(self.processed_dir, f'data_test_{graph_id}.pt'))
-                else:
-                    continue
+            elif int(graph_id) in self.cfg.data.train_ids:
+                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_{graph_id}.pt'))
             else:
-                if int(graph_id) in self.cfg.data.train_ids:
-                    torch.save(data_to_save, os.path.join(self.processed_dir, f'data_{graph_id}.pt'))
-                else:
-                    continue
+                continue
 
-    def __len__(self):
+    def len(self):
         return len(self.processed_file_names)
 
     def __getitem__(self, idx):

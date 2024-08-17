@@ -37,7 +37,7 @@ def main(cfg: DictConfig) -> None:
     train_dataset = HCPDataset(cfg=cfg).shuffle()
     test_dataset = HCPDataset(cfg=cfg, is_test=True).shuffle()
     # Фиксируем seed для воспроизводимости
-    torch.manual_seed(cfg.model.random_seed)
+    torch.manual_seed(cfg.model.random_state)
     random.seed(cfg.model.random_state)
     np.random.seed(cfg.model.random_state)
     print('End!')
