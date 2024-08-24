@@ -143,28 +143,30 @@ class HCPDataset(Dataset):
             label = self.cfg.data.dataset.labels[try_list[2]]
             graph_id = try_list[0]
             data = pd.read_csv(fpath, sep=self.cfg.data.sep)
-            edge_indices = torch.tensor(data[self.cfg.data.edges_colnames].to_numpy(), dtype=torch.long)
+            edge_indices = torch.tensor(data[self.cfg.data.edges_colnames].T.to_numpy(), dtype=torch.long)
             edge_weights = torch.tensor(data[self.cfg.data.weights_colname].to_numpy(), dtype=torch.float)
-            num_of_nodes = data[self.cfg.data.edges_colnames[0]].nunique()
+            num_of_nodes = pd.concat([data[self.cfg.data.edges_colnames[0]],
+                                      data[self.cfg.data.edges_colnames[1]]],
+                                     axis=0,
+                                     ignore_index=True).nunique()
             # Указываем все единицы в качестве фичей на нодах
-            node_features = torch.tensor(np.ones(num_of_nodes).reshape(-1, 1))
+            node_features = torch.tensor(np.ones(num_of_nodes).reshape(-1, 1), dtype=torch.float)
             data_to_save = Data(x=node_features,
                                 edge_index=edge_indices,
-                                # edge_attr=None,
                                 edge_weight=edge_weights,
                                 y=label)
             if self.is_test:
                 if int(graph_id) in self.cfg.data.test_ids:
-                    torch.save(data_to_save, os.path.join(self.processed_dir, f'data_test_{graph_id}.pt'))
+                    torch.save(data_to_save, os.path.join(self.processed_dir, f'data_test_{graph_id}_{label}.pt'))
             elif int(graph_id) in self.cfg.data.train_ids:
-                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_{graph_id}.pt'))
+                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_{graph_id}_{label}.pt'))
             else:
                 continue
 
     def len(self):
         return len(self.processed_file_names)
 
-    def __getitem__(self, idx):
+    def get(self, idx):
         return torch.load(
             os.path.join(self.processed_dir, self.processed_file_names[idx])
         )

@@ -1,0 +1,19 @@
+# # Конфигурационный файл, содержащий общие параметры для моделей
+
+# Устанавливаем начальное состояние для генерации случайных чисел
+random_state: 17
+
+# Количество эпох обучения
+max_epochs: 100
+
+# Ранний останов для контроля переобучения
+stoping:
+  # Number of epochs to wait of decreasing of test loss before early stop
+  patience: 100
+  verbose: true
+  delta: 0.01
+  path: '${hydra:runtime.output_dir}/checkpoint.pt'
+
+defaults:
+  - model: skipgcn
+  - _self_

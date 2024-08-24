@@ -1,0 +1,15 @@
+artifact_uri: file:///home/vadim/workspace/%D0%98%D0%BD%D1%81%D1%82%D0%B8%D1%82%D1%83%D1%82/HSE/Daniil/HCP_GCN/mlruns/0/c3f4f66c5e754cc585d5ecb23e95da90/artifacts
+end_time: 1724538343378
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c3f4f66c5e754cc585d5ecb23e95da90
+run_name: stately-horse-826
+run_uuid: c3f4f66c5e754cc585d5ecb23e95da90
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1724538290472
+status: 3
+tags: []
+user_id: vadim

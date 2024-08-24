@@ -8,8 +8,7 @@ hydra:
     dir: .
 
 defaults:
-  #- data: config
   - data: config
-  - model: config
+  - models: config
   # Config from this file override the values of configs from the Defaults List
   - _self_

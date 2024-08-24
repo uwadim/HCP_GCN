@@ -1,0 +1,12 @@
+# Конфигурационный файл для модели SkipGCN
+name: SkipGCN
+learning_rate: 0.001
+early_stopping: False
+
+params:
+  # Размер батча (количество)
+  batch_size: 32
+  # Размер эмбеддинга для вершины графа
+  hidden_channels: 6
+  # Вероятность дропаута
+  dropout: 0.05
