@@ -177,10 +177,20 @@ def train_valid_model(cfg: DictConfig,
                                                                          test_loader=valid_loader,
                                                                          criterion=criterion,
                                                                          calc_conf_matrix=True)
+    if mlflow_object is not None:
+        mlflow_object.log_metric('Final train loss', train_loss)
+        mlflow_object.log_metric('Final valid loss', valid_loss)
+        mlflow_object.log_metric('Final train accuracy', train_acc)
+        mlflow_object.log_metric('Final valid accuracy', valid_acc)
+        mlflow_object.log_metric('Final train roc_auc', train_auc)
+        mlflow_object.log_metric('Final valid roc_auc', valid_auc)
+        # mlflow_object.log_metric('Final train conf_matrix', train_conf_matrix)
+        # mlflow_object.log_metric('Final valid conf_matrix', valid_conf_matrix)
+
     print(f'Final TRAIN loss: {train_loss}, accuracy: {train_acc}, AUC ROC: {train_auc}\n'
           f'Final VALID loss: {valid_loss}, accuracy: {valid_acc}, AUC ROC: {valid_auc}\n')
 
-    return train_loss
+    return valid_loss
 
 
 def test_model(model, device, test_loader, criterion, accuracy, cfg, mlflow_object: Optional[Any] = None):

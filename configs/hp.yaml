@@ -1,0 +1,32 @@
+# Конфигурационный файл для подбора гиперпараметров
+# Запускается вместо config.yaml
+mlflow:
+  # Название эксперимента для MLFlow: "название модели"_"тип датасета"_"название датасета"_"тип кодирования данных"
+  experiment_name: '${models.model.name}_${data.dataset_type}_${data.dataset.root}_${data.coding_type}'
+  # Место сохранения БД MLFlow
+  tracking_uri: 'sqlite:///${hydra:runtime.cwd}/mlflow/mlruns.db'
+
+hydra:
+ run:
+  dir: hp_search/${now:%Y-%m-%d}/${now:%H-%M-%S}
+ sweeper:
+   sampler:
+     seed: ${models.random_state}
+   direction: minimize
+   study_name: main_val
+   storage: null
+   n_trials: 20
+   n_jobs: 12
+   params:
+     models.model.params.hidden_channels: int(interval(3, 16))
+
+debug: True
+
+defaults:
+  - data: config
+  - models: config
+  - override hydra/sweeper: optuna
+  - override hydra/sweeper/sampler: tpe
+  #- override hydra/launcher: joblib
+  # Config from this file override the values of configs from the Defaults List
+  - _self_

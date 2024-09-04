@@ -21,7 +21,7 @@ from pytorchtools import seed_everything
 
 from models import GCN, SkipGCN
 from train import train_valid_model, test_model, reset_model
-set_debug(True)
+# set_debug(True)
 log = logging.getLogger(__name__)
 
 
@@ -31,18 +31,24 @@ def main(cfg: DictConfig) -> None:
     seed_everything(cfg.models.random_state)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    # Для ТЕСТА
+    ## Для ОТЛАДКИ
     # device = torch.device('cpu')
     # Готовим обучающую и тестовую выборки
     train_dataset = HCPDataset(cfg=cfg).shuffle()
-    test_dataset = HCPDataset(cfg=cfg, is_test=True).shuffle()
+
+    valid_test_dataset = HCPDataset(cfg=cfg, is_test=True).shuffle()
+    valid_dataset = valid_test_dataset[:39]
+    test_dataset = valid_test_dataset[39:]
 
     train_loader = DataLoader(train_dataset,
                               batch_size=cfg.models.model.params['batch_size'],  # len(train_dataset),
                               shuffle=False)
-    test_loader = DataLoader(test_dataset,
-                              batch_size=len(test_dataset),
+    valid_loader = DataLoader(valid_dataset,
+                              batch_size=len(valid_dataset),
                               shuffle=False)
+    test_loader = DataLoader(test_dataset,
+                             batch_size=len(test_dataset),
+                             shuffle=False)
     # Инициализируем модель с параметрами из соответствующего конфигурационного файла
     model = eval(f'{cfg.models.model.name}(model_params={cfg.models.model.params},'
                  f'num_node_features={train_dataset.num_node_features})')
@@ -53,13 +59,17 @@ def main(cfg: DictConfig) -> None:
     optimizer = torch.optim.Adam(model.parameters(),
                                  lr=cfg.models.model['learning_rate'])
     scheduler = LinearLR(optimizer,
+                         start_factor=1,
+                         end_factor=0.1,
                          total_iters=cfg.models['max_epochs'])
-    with mlflow.start_run():  # type: ignore
+    mlflow.set_tracking_uri(uri=cfg.mlflow['tracking_uri'])  # type: ignore
+    mlflow.set_experiment(experiment_name=cfg.mlflow['experiment_name'])  # type: ignore
+    with mlflow.start_run(run_name=f'hp_hidden_channels={cfg.models.model.params.hidden_channels}'):  # type: ignore
         train_valid_model(cfg=cfg,
                           model=model,
                           device=device,
                           train_loader=train_loader,
-                          valid_loader=test_loader,
+                          valid_loader=valid_loader,
                           criterion=criterion,
                           optimizer=optimizer,
                           scheduler=scheduler,

@@ -133,6 +133,9 @@ class HCPDataset(Dataset):
         for p in raw_path.iterdir():
             if p.is_dir():
                 shutil.rmtree(p)
+        # Если корреляционные графы, то распаковываем данные для расчета средних по времени
+        if self.cfg.data.dataset_type == 'correlation_graphs':
+            shutil.unpack_archive(self.cfg.data.dataset.untouched_url, f'{self.root}/untouched')
 
     def process(self) -> None:
         for fpath in self.raw_paths:
@@ -143,6 +146,9 @@ class HCPDataset(Dataset):
             label = self.cfg.data.dataset.labels[try_list[2]]
             graph_id = try_list[0]
             data = pd.read_csv(fpath, sep=self.cfg.data.sep)
+            # Если индексы ребер начинаются не с 0, то переиндексируем их
+            if data[self.cfg.data.edges_colnames[0]].min() != 0:
+                data.loc[:, self.cfg.data.edges_colnames] = data[self.cfg.data.edges_colnames] - 1
             edge_indices = torch.tensor(data[self.cfg.data.edges_colnames].T.to_numpy(), dtype=torch.long)
             edge_weights = torch.tensor(data[self.cfg.data.weights_colname].to_numpy(), dtype=torch.float)
             num_of_nodes = pd.concat([data[self.cfg.data.edges_colnames[0]],
@@ -151,6 +157,12 @@ class HCPDataset(Dataset):
                                      ignore_index=True).nunique()
             # Указываем все единицы в качестве фичей на нодах
             node_features = torch.tensor(np.ones(num_of_nodes).reshape(-1, 1), dtype=torch.float)
+            # Если корреляционные графы, то считаем средние по времени, как фичи вершин
+            if self.cfg.data.dataset_type == 'correlation_graphs':
+                features_data = \
+                    pd.read_csv(f'{self.root}/untouched/{self.cfg.data.dataset.root.upper()}/{"_".join(try_list)}.csv')
+                features_data = features_data.drop(columns=['Unnamed: 0']).mean(axis=1)
+                node_features = torch.tensor(features_data.to_numpy().reshape(-1, 1), dtype=torch.float)
             data_to_save = Data(x=node_features,
                                 edge_index=edge_indices,
                                 edge_weight=edge_weights,

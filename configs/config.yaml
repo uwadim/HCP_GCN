@@ -1,5 +1,12 @@
 # Основной конфигурационный файл
 
+mlflow:
+  # Название эксперимента для MLFlow: "название модели"_"тип датасета"_"название датасета"_"тип кодирования данных"
+  experiment_name: '${models.model.name}_${data.dataset_type}_${data.dataset.root}_${data.coding_type}'
+  # Место сохранения БД MLFlow
+  tracking_uri: 'sqlite:///${hydra:runtime.cwd}/mlflow/mlruns.db'
+
+
 # Запрещаем гидре менять рабочий каталог и создавать подкаталоги
 hydra:
   job:
