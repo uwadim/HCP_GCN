@@ -1,8 +1,9 @@
 # coding: utf-8
 """ training procedure """
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 import numpy as np
+import pandas as pd
 import torch  # type: ignore
 from omegaconf import DictConfig
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score  # type: ignore
@@ -12,7 +13,10 @@ from mlflow_helpers import log_params_from_omegaconf_dict
 from pytorchtools import EarlyStopping  # type: ignore
 
 
-def train_one_epoch(model, device, train_loader, criterion, optimizer) -> float:  # type: ignore
+def train_one_epoch(model,
+                    device,
+                    train_loader,
+                    criterion, optimizer, pooling_type) -> float:  # type: ignore
     """Make training for one epoch using all batches
 
     Parameters
@@ -40,7 +44,10 @@ def train_one_epoch(model, device, train_loader, criterion, optimizer) -> float:
         # ######################
         # Reset gradients
         optimizer.zero_grad()
-        out = model(x=data.x, edge_index=data.edge_index, edge_weight=data.edge_weight,
+        out = model(x=data.x,
+                    edge_index=data.edge_index,
+                    edge_weight=data.edge_weight,
+                    pooling_type=pooling_type,
                     batch=data.batch)  # Perform a single forward pass.
         loss = criterion(out, data.y.float().reshape(-1, 1))  # Compute the loss.
         loss.backward()  # Derive gradients.
@@ -52,7 +59,12 @@ def train_one_epoch(model, device, train_loader, criterion, optimizer) -> float:
 
 
 @torch.no_grad()
-def test_one_epoch(model, device, test_loader, criterion, calc_conf_matrix=False) -> tuple[float, ...]:
+def test_one_epoch(model,
+                   device,
+                   test_loader,
+                   criterion,
+                   pooling_type,
+                   calc_conf_matrix=False) -> tuple[float, ...]:
     model.eval()
     running_loss = 0.0
     step = 0
@@ -60,13 +72,18 @@ def test_one_epoch(model, device, test_loader, criterion, calc_conf_matrix=False
     batch_accuracy = []
     all_trues = []
     all_preds = []
+    all_graph_ids = []
 
     for data in test_loader:
         data.to(device)  # Use GPU
         # ####### DEBUG for pytorch Dataset, not for PYG ########
         # real_graph_indices = data.graph_index.detach().to('cpu').numpy() - data.ptr.detach().to('cpu').numpy()[:-1]
         # ######################
-        out = model(x=data.x, edge_index=data.edge_index, edge_weight=data.edge_weight, batch=data.batch)
+        out = model(x=data.x,
+                    edge_index=data.edge_index,
+                    edge_weight=data.edge_weight,
+                    pooling_type=pooling_type,
+                    batch=data.batch)
         loss = criterion(out, data.y.float().reshape(-1, 1))
         running_loss += loss.item()
         step += 1
@@ -78,11 +95,29 @@ def test_one_epoch(model, device, test_loader, criterion, calc_conf_matrix=False
         if calc_conf_matrix:
             all_trues.extend(y_true)
             all_preds.extend(y_pred)
+            all_graph_ids.extend(data.graph_id)
 
     if calc_conf_matrix:
-        conf_matrix = confusion_matrix(np.asarray(all_trues), np.asarray(all_preds).round())
-        return running_loss / step, np.mean(batch_accuracy), np.mean(batch_auc), conf_matrix
-    return running_loss / step, np.mean(batch_auc), np.mean(batch_accuracy)
+        conf_matrix = confusion_matrix(np.asarray(all_trues), np.asarray(all_preds).ravel().round())
+        diff = np.asarray(all_trues) - np.asarray(all_preds).ravel().round()
+        # DataFrame для определения индексов элементов матрицы ошибок
+        try_df = pd.DataFrame({'true': all_trues, 'diff': diff.astype(int).tolist(), 'graph_id': all_graph_ids})
+        # Индексы элементов матрицы ошибок для TP, TN, FP, FN
+        tp_ids = try_df.query('true == 1 and diff == 0')['graph_id'].to_list()
+        tn_ids = try_df.query('true == 0 and diff == 0')['graph_id'].to_list()
+        fp_ids = try_df.query('diff == -1')['graph_id'].to_list()
+        fn_ids = try_df.query('diff == 1')['graph_id'].to_list()
+        return (running_loss / step,
+                np.mean(batch_accuracy),
+                np.mean(batch_auc),
+                conf_matrix,
+                tp_ids,
+                tn_ids,
+                fp_ids,
+                fn_ids)
+    return (running_loss / step,
+            np.mean(batch_auc),
+            np.mean(batch_accuracy))
 
 
 def reset_model(model):
@@ -98,8 +133,9 @@ def train_valid_model(cfg: DictConfig,
                       valid_loader,
                       criterion,
                       optimizer,
+                      pooling_type,
                       scheduler,
-                      mlflow_object: Optional[Any] = None) -> float:
+                      mlflow_object: Optional[Any] = None) -> tuple[float, ...]:
     print("Start training ...")
     # to track the average training loss per epoch as the model trains
     avg_train_losses = []
@@ -120,34 +156,37 @@ def train_valid_model(cfg: DictConfig,
         ###################
         # train the model #
         ###################
-        train_loss = train_one_epoch(model=model, device=device, train_loader=train_loader, criterion=criterion,
-                                     optimizer=optimizer)
+        train_loss = train_one_epoch(model=model,
+                                     device=device,
+                                     train_loader=train_loader,
+                                     criterion=criterion,
+                                     optimizer=optimizer,
+                                     pooling_type=pooling_type)
         # record training loss
         avg_train_losses.append(train_loss)
 
         ######################
         # validate the model #
         ######################
-        valid_loss, valid_acc, valid_auc, valid_conf_matrix = test_one_epoch(model=model,
-                                                                             device=device,
-                                                                             test_loader=valid_loader,
-                                                                             criterion=criterion,
-                                                                             calc_conf_matrix=True)
+        (valid_loss,
+         valid_acc,
+         valid_auc) = test_one_epoch(model=model,
+                                     device=device,
+                                     test_loader=valid_loader,
+                                     criterion=criterion,
+                                     pooling_type=pooling_type,
+                                     calc_conf_matrix=False)
         avg_valid_losses.append(valid_loss)
-
-        epoch_len = len(str(n_epochs))
-
+        epoch_len = len(str(n_epochs))  # длина строки с количеством эпох (для выравнивания вывода)
         if mlflow_object is not None:
             mlflow_object.log_metric('train loss', train_loss, step=epoch)
             mlflow_object.log_metric('valid loss', valid_loss, step=epoch)
             mlflow_object.log_metric('valid accuracy', valid_acc, step=epoch)
             mlflow_object.log_metric('valid roc_auc', valid_auc, step=epoch)
 
-        print_msg = (f'[{epoch:>{epoch_len}}/{n_epochs:>{epoch_len}}] '
-                     f'train_loss: {train_loss:.5f} '
-                     f'valid_loss: {valid_loss:.5f} ')
-
-        print(print_msg)
+        print(f'[{epoch:>{epoch_len}}/{n_epochs:>{epoch_len}}] '
+              f'train_loss: {train_loss:.5f} '
+              f'valid_loss: {valid_loss:.5f} ')
 
         # early_stopping needs the validation loss to check if it has decresed,
         # and if it has, it will make a checkpoint of the current model
@@ -167,16 +206,32 @@ def train_valid_model(cfg: DictConfig,
     # load the last checkpoint with the best model
     if cfg.models.model.early_stopping:
         model.load_state_dict(torch.load(cfg.training.stoping['path']))
-    train_loss, train_acc, train_auc, train_conf_matrix = test_one_epoch(model=model,
-                                                                             device=device,
-                                                                             test_loader=train_loader,
-                                                                             criterion=criterion,
-                                                                             calc_conf_matrix=True)
-    valid_loss, valid_acc, valid_auc, valid_conf_matrix = test_one_epoch(model=model,
-                                                                         device=device,
-                                                                         test_loader=valid_loader,
-                                                                         criterion=criterion,
-                                                                         calc_conf_matrix=True)
+    (train_loss,
+     train_acc,
+     train_auc,
+     train_conf_matrix,
+     train_tp_ids,
+     train_tn_ids,
+     train_fp_ids,
+     train_fn_ids) = test_one_epoch(model=model,
+                                         device=device,
+                                         test_loader=train_loader,
+                                         criterion=criterion,
+                                         pooling_type=pooling_type,
+                                         calc_conf_matrix=True)
+    (valid_loss,
+     valid_acc,
+     valid_auc,
+     valid_conf_matrix,
+     valid_tp_ids,
+     valid_tn_ids,
+     valid_fp_ids,
+     valid_fn_ids) = test_one_epoch(model=model,
+                                         device=device,
+                                         test_loader=valid_loader,
+                                         criterion=criterion,
+                                         pooling_type=pooling_type,
+                                         calc_conf_matrix=True)
     if mlflow_object is not None:
         mlflow_object.log_metric('Final train loss', train_loss)
         mlflow_object.log_metric('Final valid loss', valid_loss)
@@ -184,26 +239,58 @@ def train_valid_model(cfg: DictConfig,
         mlflow_object.log_metric('Final valid accuracy', valid_acc)
         mlflow_object.log_metric('Final train roc_auc', train_auc)
         mlflow_object.log_metric('Final valid roc_auc', valid_auc)
-        # mlflow_object.log_metric('Final train conf_matrix', train_conf_matrix)
-        # mlflow_object.log_metric('Final valid conf_matrix', valid_conf_matrix)
+        mlflow_object.log_param('Final train Conf. Matrix', ', '.join(map(str, train_conf_matrix.ravel().tolist())))
+        mlflow_object.log_param('Final train True Positive IDs', ', '.join(train_tp_ids))
+        mlflow_object.log_param('Final train True Negative IDs', ', '.join(train_tn_ids))
+        mlflow_object.log_param('Final train False Positive IDs', ', '.join(train_fp_ids))
+        mlflow_object.log_param('Final train False Negative IDs', ', '.join(train_fn_ids))
+        mlflow_object.log_param('Final valid Conf. Matrix', ', '.join(map(str, valid_conf_matrix.ravel().tolist())))
+        mlflow_object.log_param('Final valid True Positive IDs', ', '.join(valid_tp_ids))
+        mlflow_object.log_param('Final valid True Negative IDs', ', '.join(valid_tn_ids))
+        mlflow_object.log_param('Final valid False Positive IDs', ', '.join(valid_fp_ids))
+        mlflow_object.log_param('Final valid False Negative IDs', ', '.join(valid_fn_ids))
 
     print(f'Final TRAIN loss: {train_loss}, accuracy: {train_acc}, AUC ROC: {train_auc}\n'
           f'Final VALID loss: {valid_loss}, accuracy: {valid_acc}, AUC ROC: {valid_auc}\n')
 
-    return valid_loss
+    return valid_loss, valid_acc, valid_auc
 
 
-def test_model(model, device, test_loader, criterion, accuracy, cfg, mlflow_object: Optional[Any] = None):
-    # load the last checkpoint with the best model
-    model.load_state_dict(torch.load(cfg.training.stoping['path']))
-    t_loss_test, t_mean_accr_test, conf_matrix = test_one_epoch(model, device, test_loader, criterion,
-                                                                accuracy=accuracy, calc_conf_matrix=True, cfg=cfg)
-    print(f'Final TEST loss: {t_loss_test},'
-          f' accuracy: {t_mean_accr_test}\n'
-          f' Conf Matrix: {conf_matrix}')
+def test_model(model,
+               device,
+               test_loader,
+               criterion,
+               pooling_type,
+               state_path: Optional[str] = None,
+               mlflow_object: Optional[Any] = None):
+    # Загружаем сохраненную модель, если необходимо
+    if state_path is not None:
+        model.load_state_dict(torch.load(state_path))
+    (loss,
+     accuracy,
+     auc,
+     conf_matrix,
+     tp_ids,
+     tn_ids,
+     fp_ids,
+     fn_ids
+     ) = test_one_epoch(model=model,
+                        device=device,
+                        test_loader=test_loader,
+                        criterion=criterion,
+                        pooling_type=pooling_type,
+                        calc_conf_matrix=True)
+    print(f'Final TEST loss: {loss},'
+          f' accuracy: {accuracy}'
+          f' AUC ROC: {auc}\n'
+          f'Conf Matrix: {conf_matrix}')
 
-    # sourcery skip: no-conditionals-in-tests
     if mlflow_object is not None:
-        mlflow_object.log_metric('Test loss', t_loss_test)
-        mlflow_object.log_metric('Test accuracy', t_mean_accr_test)
-        mlflow_object.log_param('Conf Matrix', ', '.join(map(str, conf_matrix.ravel().tolist())))
+        mlflow_object.log_metric('Test loss', loss)
+        mlflow_object.log_metric('Test accuracy', accuracy)
+        mlflow_object.log_metric('Test roc_auc', auc)
+        mlflow_object.log_param('Test Conf Matrix', ', '.join(map(str, conf_matrix.ravel().tolist())))
+        mlflow_object.log_param('Test True Positive IDs', ', '.join(tp_ids))
+        mlflow_object.log_param('Test True Negative IDs', ', '.join(tn_ids))
+        mlflow_object.log_param('Test False Positive IDs', ', '.join(fp_ids))
+        mlflow_object.log_param('Test False Negative IDs', ', '.join(fn_ids))

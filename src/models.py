@@ -8,7 +8,8 @@ from omegaconf import DictConfig
 from torch.nn import BatchNorm1d, Linear, Module
 from torch_geometric.nn import (ASAPooling, GATConv, GCNConv, SAGPooling,
                                 TAGConv)
-from torch_geometric.nn import global_max_pool as gmp
+from torch_geometric.nn import global_max_pool
+from torch_geometric.nn import global_mean_pool
 
 
 class SkipGCN(Module):
@@ -53,7 +54,7 @@ class SkipGCN(Module):
         self.bn1 = BatchNorm1d(num_features=2 * hidden_channels + num_node_features)
         self.lin = Linear(in_features=2 * hidden_channels + num_node_features, out_features=1)
 
-    def forward(self, x, edge_index, edge_weight, batch):
+    def forward(self, x, edge_index, edge_weight, pooling_type, batch):
         residual_0 = x
         # 1. Obtain node embeddings
         x = self.conv1(x, edge_index, edge_weight)
@@ -72,7 +73,7 @@ class SkipGCN(Module):
         # 2. Readout layer
         # Global Pooling (stack different aggregations)
         # x = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
-        x = gmp(x, batch=batch)
+        x = eval(f'{pooling_type}')(x, batch=batch)
         # Batch norm for embeddings
         x = self.bn1(x)
         self.embeddings = x.detach().to('cpu').numpy()

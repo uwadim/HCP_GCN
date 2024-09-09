@@ -17,7 +17,7 @@ class HCPDataset(Dataset):
     def __init__(self,
                  cfg: DictConfig,
                  rebuild_processed: bool = False,
-                 is_test: bool = False,
+                 kind: str = 'train',
                  transform: Optional[Callable] = None,
                  pre_transform: Optional[Callable] = None,
                  pre_filter: Optional[Callable] = None):
@@ -31,9 +31,9 @@ class HCPDataset(Dataset):
         rebuild_processed : bool, default=False
             Флаг, указывающий, нужно ли пересобрать обработанные данные.
             По умолчанию False.
-        is_test : bool, default=False
-            Флаг, указывающий, является ли набор данных тестовым.
-            По умолчанию False.
+        kind : str, {'train', 'valid', 'test'}, default='train'
+            Вид татасета, принимающий значения 'train', 'valid', 'test'
+            По умолчанию 'train'.
         transform : Optional[Callable], default=None
             Функция преобразования данных.
             По умолчанию None.
@@ -49,7 +49,7 @@ class HCPDataset(Dataset):
         None
         """
         self.cfg = cfg
-        self.is_test = is_test
+        self.kind = kind
         # Проверяем, что есть каталоги для распаковки и создаем, если это необходимо
         self.root = self.cfg.data.root_path
         # Удаляем закешированные файлы, если требуется
@@ -118,7 +118,11 @@ class HCPDataset(Dataset):
         if not processed_dir.exists():
             return []
 
-        pattern = 'data_test*.pt' if self.is_test else 'data_[!test]*.pt'
+        pattern = 'data_train*.pt'
+        if self.kind == 'valid':
+            pattern = 'data_valid*.pt'
+        elif self.kind == 'test':
+            pattern = 'data_test*.pt'
         return sorted([f.name for f in processed_dir.glob(pattern)])
 
     def download(self) -> None:
@@ -166,12 +170,14 @@ class HCPDataset(Dataset):
             data_to_save = Data(x=node_features,
                                 edge_index=edge_indices,
                                 edge_weight=edge_weights,
-                                y=label)
-            if self.is_test:
-                if int(graph_id) in self.cfg.data.test_ids:
-                    torch.save(data_to_save, os.path.join(self.processed_dir, f'data_test_{graph_id}_{label}.pt'))
-            elif int(graph_id) in self.cfg.data.train_ids:
-                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_{graph_id}_{label}.pt'))
+                                y=label,
+                                graph_id=f'{graph_id}_{label}')
+            if self.kind == 'train' and int(graph_id) in self.cfg.data.train_ids:
+                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_train_{graph_id}_{label}.pt'))
+            elif self.kind == 'valid' and int(graph_id) in self.cfg.data.valid_ids:
+                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_valid_{graph_id}_{label}.pt'))
+            elif self.kind == 'test' and int(graph_id) in self.cfg.data.test_ids:
+                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_test_{graph_id}_{label}.pt'))
             else:
                 continue
 

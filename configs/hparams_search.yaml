@@ -12,13 +12,15 @@ hydra:
  sweeper:
    sampler:
      seed: ${models.random_state}
-   direction: minimize
-   study_name: main_val
+   direction: maximize  # Максимизируем, т.к. оптимизируемся на метрике accuracy
+   study_name: main_acc
    storage: null
-   n_trials: 20
+   n_trials: 2
    n_jobs: 12
    params:
-     models.model.params.hidden_channels: int(interval(3, 16))
+     models.model.params.hidden_channels: int(interval(8, 32))
+     models.model.params.dropout: range(0.05, 0.6)
+
 
 debug: True
 
@@ -27,6 +29,7 @@ defaults:
   - models: config
   - override hydra/sweeper: optuna
   - override hydra/sweeper/sampler: tpe
+  # Устанавливаем лаунчер joblib только, если готова папка processed (для первого прогона комментируем)
   #- override hydra/launcher: joblib
   # Config from this file override the values of configs from the Defaults List
   - _self_
