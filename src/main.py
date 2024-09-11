@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 from omegaconf import DictConfig
-from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import LinearLR, CyclicLR
 from torch_geometric import set_debug
 from torch_geometric.loader.dataloader import DataLoader
 
@@ -61,10 +61,16 @@ def main(cfg: DictConfig) -> float:
                          start_factor=1,
                          end_factor=0.1,
                          total_iters=cfg.models['max_epochs'])
+    # scheduler = CyclicLR(optimizer,
+    #                      base_lr=0.0005,
+    #                      max_lr=0.05,
+    #                      step_size_up=10,
+    #                      mode="triangular2")
     mlflow.set_tracking_uri(uri=cfg.mlflow['tracking_uri'])  # type: ignore
     mlflow.set_experiment(experiment_name=cfg.mlflow['experiment_name'])  # type: ignore
-    # run_name = f'hp_hidden_channels={cfg.models.model.params.hidden_channels}'
-    run_name = 'Best params'
+    #run_name = f'hp_pooling_type={cfg.models.model.params.pooling_type}'
+    #run_name = f'hp_hidden_channels={cfg.models.model.params.hidden_channels}_dopout={cfg.models.model.params.dropout}'
+    run_name = 'scheduler = LinearLR'
     with mlflow.start_run(run_name=run_name):  # type: ignore
         valid_loss, valid_acc, valid_auc = train_valid_model(cfg=cfg,
                                                              model=model,
@@ -77,13 +83,25 @@ def main(cfg: DictConfig) -> float:
                                                              scheduler=scheduler,
                                                              mlflow_object=mlflow)
         # для инфо
+        # Словарь для построения графиков
+        plot_dict = None
+        if cfg.mlflow['save_adjacency_matrices']:
+            plot_dict = {
+                'fname': cfg.mlflow['experiment_name'],
+                'processed_dir': f'{cfg.data["root_path"]}/processed',
+                'seed': cfg.models.random_state,
+                'max_elements': cfg.mlflow['max_elements'],
+                'palette_name': cfg.mlflow['palette_name'],
+                'dataset_type': cfg.data['dataset_type'],
+            }
         test_model(model=model,
                    device=device,
                    test_loader=test_loader,
                    criterion=criterion,
                    pooling_type=cfg.models.model.params['pooling_type'],
                    state_path=None,
-                   mlflow_object=mlflow)
+                   mlflow_object=mlflow,
+                   plot_dict=plot_dict)
     print('End!')
     # Возвращаем величину, которую будем оптимизируем при подборе гиперпараметров
     return valid_acc  # Средняя доля верных ответов по валидационному датасету (максимизируем!!)

@@ -1,13 +1,17 @@
 # coding: utf-8
 """ training procedure """
-from typing import Any, Optional, List
+import random
+from typing import Any, List, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import torch  # type: ignore
 from omegaconf import DictConfig
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score  # type: ignore
 from torch import sigmoid
+from torch_geometric.utils import to_dense_adj
 
 from mlflow_helpers import log_params_from_omegaconf_dict
 from pytorchtools import EarlyStopping  # type: ignore
@@ -262,7 +266,8 @@ def test_model(model,
                criterion,
                pooling_type,
                state_path: Optional[str] = None,
-               mlflow_object: Optional[Any] = None):
+               mlflow_object: Optional[Any] = None,
+               plot_dict: Optional[dict] = None):
     # Загружаем сохраненную модель, если необходимо
     if state_path is not None:
         model.load_state_dict(torch.load(state_path))
@@ -294,3 +299,47 @@ def test_model(model,
         mlflow_object.log_param('Test True Negative IDs', ', '.join(tn_ids))
         mlflow_object.log_param('Test False Positive IDs', ', '.join(fp_ids))
         mlflow_object.log_param('Test False Negative IDs', ', '.join(fn_ids))
+        if plot_dict is not None:
+            print('Save adjacency matrices...')
+            random.seed(plot_dict['seed'])
+            for ids, ids_name in zip([tp_ids, tn_ids, fp_ids, fn_ids], ['TP', 'TN', 'FP', 'FN']):
+                elements = random.sample(ids, min(len(ids), plot_dict['max_elements']))
+                # Создаем adjacency matrix из
+                for el in elements:
+                    # Загружаем граф
+                    graph = torch.load(f'{plot_dict["processed_dir"]}/data_test_{el}.pt')
+                    # Создаем матрицу смежности (верхнюю диагональ, т.к. граф неориентированный)
+                    # берем нулевой элемент, т.к. получается тензор с первой размерностью = 1
+                    adj = to_dense_adj(edge_index=graph.edge_index, edge_attr=graph.edge_weight)[0].numpy()
+                    # Добавляем нижнюю диагональ
+                    adj = adj + adj.T - np.diag(np.diag(adj))
+                    plot_adj_matrix(adj_matrix=adj,
+                                    pic_name = f'{ids_name}_{plot_dict['fname']}_{el}.png',
+                                    palette_name=plot_dict['palette_name'],
+                                    kind=ids_name,
+                                    dataset_type=plot_dict['dataset_type'],
+                                    mlflow_object=mlflow_object)
+
+
+def plot_adj_matrix(adj_matrix: np.ndarray,
+                    pic_name: str,
+                    palette_name: str,
+                    kind: str,
+                    dataset_type,
+                    mlflow_object: Optional[Any] = None):
+    fig, ax = plt.subplots()
+    if dataset_type == 'correlation_graphs':
+        vmin = -6
+        vmax = 6
+    elif dataset_type == 'ensemble_graphs':
+        vmin = -1
+        vmax = 1
+    else:
+        raise ValueError(f'Значение dataset_type = {dataset_type} не поддерживается')
+    ax = sns.heatmap(adj_matrix,
+                     cmap=sns.color_palette(palette_name, as_cmap=True),
+                     vmin=vmin,
+                     vmax=vmax)
+    ax.set(xlabel='graph index', ylabel='graph index')
+    ax.set_title(f'Test {kind} adjacency matrix')
+    mlflow_object.log_figure(fig, pic_name)

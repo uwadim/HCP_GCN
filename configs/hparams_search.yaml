@@ -5,6 +5,8 @@ mlflow:
   experiment_name: '${models.model.name}_${data.dataset_type}_${data.dataset.root}_${data.coding_type}'
   # Место сохранения БД MLFlow
   tracking_uri: 'sqlite:///${hydra:runtime.cwd}/mlflow/mlruns.db'
+  # Сохранять примеры матриц сопряженности
+  save_adjacency_matrices: False
 
 hydra:
  run:
@@ -15,11 +17,12 @@ hydra:
    direction: maximize  # Максимизируем, т.к. оптимизируемся на метрике accuracy
    study_name: main_acc
    storage: null
-   n_trials: 2
-   n_jobs: 12
+   n_trials: 40
+   n_jobs: 1
    params:
      models.model.params.hidden_channels: int(interval(8, 32))
-     models.model.params.dropout: range(0.05, 0.6)
+     models.model.params.dropout: range(0.05, 0.6, step=0.05)
+#     models.model.params.pooling_type: choice('global_max_pool', 'global_mean_pool')
 
 
 debug: True
