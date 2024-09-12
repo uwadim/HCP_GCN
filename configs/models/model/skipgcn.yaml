@@ -7,8 +7,8 @@ params:
   # Размер батча (количество)
   batch_size: 32
   # Размер эмбеддинга для вершины графа
-  hidden_channels: 14
+  hidden_channels: 15
   # Вероятность дропаута
-  dropout: 0.45
+  dropout: 0.15
   # Тип пулинга: global_max_pool, global_mean_pool
   pooling_type: 'global_max_pool'  # 'global_mean_pool'

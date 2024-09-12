@@ -6,6 +6,7 @@ __pycache__/
 *.log
 /data/
 hp_search/
+mlruns/
 multirun/
 logs/
 notebooks/
