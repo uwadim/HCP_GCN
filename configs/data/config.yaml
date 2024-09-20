@@ -2,8 +2,8 @@
 
 # Тип датасета: Корреляционные или синолитические графы
 # Значение dataset_type должно быть равно названию папки, в которой находятся архивы
-dataset_type: 'correlation_graphs'
-# dataset_type: 'ensemble_graphs'
+# dataset_type: 'correlation_graphs'
+dataset_type: 'ensemble_graphs'
 
 # Путь к каталогу с датасетом относительно рабочего каталога программы
 root_path: './data/${.dataset_type}/${data.dataset.root}'
@@ -133,4 +133,4 @@ test_ids:
   - 911849
 
 defaults:
-  - dataset: motor
+  - dataset: wm

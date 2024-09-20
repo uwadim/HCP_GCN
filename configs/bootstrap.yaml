@@ -1,0 +1,33 @@
+# Configuration file for calculation of metrics.
+
+mlflow:
+  # Название эксперимента для MLFlow: "название модели"_"тип датасета"_"название датасета"_"тип кодирования данных"
+  experiment_name: 'bootstrap_${models.model.name}_${data.dataset_type}_${data.dataset.root}_${data.coding_type}'
+  # Место сохранения БД MLFlow
+  tracking_uri: 'sqlite:///${hydra:runtime.cwd}/mlflow/mlruns.db'
+  # Сохранять примеры матриц сопряженности
+  save_adjacency_matrices: True
+  # Брать количество элементов из max(len, max_elements)
+  # Если длина выборки больше max_elements, то семплировать max_elements случайными значениями
+  max_elements: 5
+  # Название палитры seaborn для отрисовки матриц смежности
+  palette_name: 'coolwarm'
+
+make_bootstrap: True
+
+hydra:
+  run:
+    dir: bootstrap/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweeper:
+    params:
+      data/dataset: choice(wm)
+      data.dataset_type: choice('correlation_graphs','ensemble_graphs')
+      models.random_state: range(3, 503, 10)
+
+defaults:
+  - data: config
+  - models: config
+  # Config from this file override the values of configs from the Defaults List
+  - _self_
+
+

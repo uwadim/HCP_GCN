@@ -9,6 +9,7 @@ import hydra
 
 import mlflow
 import numpy as np
+import pandas as pd
 import torch
 
 from omegaconf import DictConfig
@@ -28,6 +29,15 @@ log = logging.getLogger(__name__)
 
 @hydra.main(version_base='1.3', config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> float:
+    if 'make_bootstrap' in cfg.keys() and cfg.make_bootstrap:
+        config_df = pd.read_csv('configs/dataset_best_params.csv')
+        cfg.models.model.params['hidden_channels'] = \
+            config_df.query(f'dataset == "{cfg.data.dataset.root}"'
+                            f' and dataset_type == "{cfg.data.dataset_type}"')['hidden_channels'].to_list()[0]
+        cfg.models.model.params['dropout'] = \
+            config_df.query(f'dataset == "{cfg.data.dataset.root}"'
+                            f' and dataset_type == "{cfg.data.dataset_type}"')['dropout'].to_list()[0]
+
     # Фиксируем seed для воспроизводимости
     seed_everything(cfg.models.random_state)
 
@@ -70,7 +80,7 @@ def main(cfg: DictConfig) -> float:
     mlflow.set_experiment(experiment_name=cfg.mlflow['experiment_name'])  # type: ignore
     #run_name = f'hp_pooling_type={cfg.models.model.params.pooling_type}'
     #run_name = f'hp_hidden_channels={cfg.models.model.params.hidden_channels}_dopout={cfg.models.model.params.dropout}'
-    run_name = 'scheduler = LinearLR'
+    run_name = f'seed={cfg.models.random_state}'
     with mlflow.start_run(run_name=run_name):  # type: ignore
         valid_loss, valid_acc, valid_auc = train_valid_model(cfg=cfg,
                                                              model=model,
@@ -93,6 +103,7 @@ def main(cfg: DictConfig) -> float:
                 'max_elements': cfg.mlflow['max_elements'],
                 'palette_name': cfg.mlflow['palette_name'],
                 'dataset_type': cfg.data['dataset_type'],
+                'result_path': f'results/{cfg.mlflow["experiment_name"]}.txt',
             }
         test_model(model=model,
                    device=device,

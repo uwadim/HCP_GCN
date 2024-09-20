@@ -9,7 +9,8 @@ import pandas as pd
 import seaborn as sns
 import torch  # type: ignore
 from omegaconf import DictConfig
-from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score  # type: ignore
+from sklearn.metrics import (accuracy_score, confusion_matrix,
+                             roc_auc_score, precision_recall_fscore_support)  # type: ignore
 from torch import sigmoid
 from torch_geometric.utils import to_dense_adj
 
@@ -104,6 +105,9 @@ def test_one_epoch(model,
     if calc_conf_matrix:
         conf_matrix = confusion_matrix(np.asarray(all_trues), np.asarray(all_preds).ravel().round())
         diff = np.asarray(all_trues) - np.asarray(all_preds).ravel().round()
+        precision, recall, fscore, support = precision_recall_fscore_support(y_true=np.asarray(all_trues),
+                                                                             y_pred=np.asarray(all_preds).ravel().round(),
+                                                                             average=None)
         # DataFrame для определения индексов элементов матрицы ошибок
         try_df = pd.DataFrame({'true': all_trues, 'diff': diff.astype(int).tolist(), 'graph_id': all_graph_ids})
         # Индексы элементов матрицы ошибок для TP, TN, FP, FN
@@ -111,10 +115,15 @@ def test_one_epoch(model,
         tn_ids = try_df.query('true == 0 and diff == 0')['graph_id'].to_list()
         fp_ids = try_df.query('diff == -1')['graph_id'].to_list()
         fn_ids = try_df.query('diff == 1')['graph_id'].to_list()
+
         return (running_loss / step,
                 np.mean(batch_accuracy),
                 np.mean(batch_auc),
                 conf_matrix,
+                precision[0],
+                recall[0],
+                fscore[0],
+                support[0],
                 tp_ids,
                 tn_ids,
                 fp_ids,
@@ -214,28 +223,36 @@ def train_valid_model(cfg: DictConfig,
      train_acc,
      train_auc,
      train_conf_matrix,
+     train_precision,
+     train_recall,
+     train_fscore,
+     train_support,
      train_tp_ids,
      train_tn_ids,
      train_fp_ids,
      train_fn_ids) = test_one_epoch(model=model,
-                                         device=device,
-                                         test_loader=train_loader,
-                                         criterion=criterion,
-                                         pooling_type=pooling_type,
-                                         calc_conf_matrix=True)
+                                    device=device,
+                                    test_loader=train_loader,
+                                    criterion=criterion,
+                                    pooling_type=pooling_type,
+                                    calc_conf_matrix=True)
     (valid_loss,
      valid_acc,
      valid_auc,
      valid_conf_matrix,
+     valid_precision,
+     valid_recall,
+     valid_fscore,
+     valid_support,
      valid_tp_ids,
      valid_tn_ids,
      valid_fp_ids,
      valid_fn_ids) = test_one_epoch(model=model,
-                                         device=device,
-                                         test_loader=valid_loader,
-                                         criterion=criterion,
-                                         pooling_type=pooling_type,
-                                         calc_conf_matrix=True)
+                                    device=device,
+                                    test_loader=valid_loader,
+                                    criterion=criterion,
+                                    pooling_type=pooling_type,
+                                    calc_conf_matrix=True)
     if mlflow_object is not None:
         mlflow_object.log_metric('Final train loss', train_loss)
         mlflow_object.log_metric('Final valid loss', valid_loss)
@@ -244,11 +261,19 @@ def train_valid_model(cfg: DictConfig,
         mlflow_object.log_metric('Final train roc_auc', train_auc)
         mlflow_object.log_metric('Final valid roc_auc', valid_auc)
         mlflow_object.log_param('Final train Conf. Matrix', ', '.join(map(str, train_conf_matrix.ravel().tolist())))
+        mlflow_object.log_param('Final train precision', train_precision)
+        mlflow_object.log_param('Final train recall', train_recall)
+        mlflow_object.log_param('Final train fscore', train_fscore)
+        mlflow_object.log_param('Final train support', train_support)
         mlflow_object.log_param('Final train True Positive IDs', ', '.join(train_tp_ids))
         mlflow_object.log_param('Final train True Negative IDs', ', '.join(train_tn_ids))
         mlflow_object.log_param('Final train False Positive IDs', ', '.join(train_fp_ids))
         mlflow_object.log_param('Final train False Negative IDs', ', '.join(train_fn_ids))
         mlflow_object.log_param('Final valid Conf. Matrix', ', '.join(map(str, valid_conf_matrix.ravel().tolist())))
+        mlflow_object.log_param('Final valid precision', valid_precision)
+        mlflow_object.log_param('Final valid recall', valid_recall)
+        mlflow_object.log_param('Final valid fscore', valid_fscore)
+        mlflow_object.log_param('Final valid support', valid_support)
         mlflow_object.log_param('Final valid True Positive IDs', ', '.join(valid_tp_ids))
         mlflow_object.log_param('Final valid True Negative IDs', ', '.join(valid_tn_ids))
         mlflow_object.log_param('Final valid False Positive IDs', ', '.join(valid_fp_ids))
@@ -275,6 +300,10 @@ def test_model(model,
      accuracy,
      auc,
      conf_matrix,
+     precision,
+     recall,
+     fscore,
+     support,
      tp_ids,
      tn_ids,
      fp_ids,
@@ -290,11 +319,20 @@ def test_model(model,
           f' AUC ROC: {auc}\n'
           f'Conf Matrix: {conf_matrix}')
 
+    with open(plot_dict['result_path'], 'a+') as fh:
+        fh.write(
+            f'accuracy: {accuracy}; AUCROC: {auc}; precision: {precision};'
+            f' recall: {recall}; fscore: {fscore}; support: {support}\n')
+
     if mlflow_object is not None:
         mlflow_object.log_metric('Test loss', loss)
         mlflow_object.log_metric('Test accuracy', accuracy)
         mlflow_object.log_metric('Test roc_auc', auc)
         mlflow_object.log_param('Test Conf Matrix', ', '.join(map(str, conf_matrix.ravel().tolist())))
+        mlflow_object.log_metric('Test precision', precision)
+        mlflow_object.log_metric('Test recall', recall)
+        mlflow_object.log_param('Test fscore', fscore)
+        mlflow_object.log_param('Test support', support)
         mlflow_object.log_param('Test True Positive IDs', ', '.join(tp_ids))
         mlflow_object.log_param('Test True Negative IDs', ', '.join(tn_ids))
         mlflow_object.log_param('Test False Positive IDs', ', '.join(fp_ids))
@@ -314,7 +352,7 @@ def test_model(model,
                     # Добавляем нижнюю диагональ
                     adj = adj + adj.T - np.diag(np.diag(adj))
                     plot_adj_matrix(adj_matrix=adj,
-                                    pic_name = f'{ids_name}_{plot_dict['fname']}_{el}.png',
+                                    pic_name=f'{ids_name}_{plot_dict['fname']}_{el}.png',
                                     palette_name=plot_dict['palette_name'],
                                     kind=ids_name,
                                     dataset_type=plot_dict['dataset_type'],
@@ -343,3 +381,4 @@ def plot_adj_matrix(adj_matrix: np.ndarray,
     ax.set(xlabel='graph index', ylabel='graph index')
     ax.set_title(f'Test {kind} adjacency matrix')
     mlflow_object.log_figure(fig, pic_name)
+    plt.close(fig)
