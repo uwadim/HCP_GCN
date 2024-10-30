@@ -1,190 +1,166 @@
 """
-Файл, формирующий датасеты для работы с графовыми нейронными сетями из пакета torch_geometric
-"""
-import os
-import shutil
-from pathlib import Path
-from typing import Callable, Optional, List
+Main function for training and evaluating a graph classification model using GCN with 3 convolutional layers and skip connections.
 
+This script performs the following steps:
+1. Loads the configuration from a YAML file.
+2. Sets the random seed for reproducibility.
+3. Prepares the training, validation, and test datasets.
+4. Initializes the model with parameters from the configuration.
+5. Trains the model using the training dataset and validates it using the validation dataset.
+6. Evaluates the model on the test dataset.
+7. Logs the results using MLflow.
+8. Returns the validation accuracy as the metric to optimize during hyperparameter tuning.
+
+Parameters:
+    cfg (DictConfig): Configuration object containing all necessary parameters for the experiment.
+
+Returns:
+    float: Validation accuracy, which is the metric to optimize during hyperparameter tuning.
+"""
+
+import logging
+import random
+
+import hydra
 import numpy as np
 import pandas as pd
 import torch
 from omegaconf import DictConfig
-from torch_geometric.data import Data, Dataset
+from torch.optim.lr_scheduler import CyclicLR, LinearLR
+from torch_geometric import set_debug
+from torch_geometric.loader.dataloader import DataLoader
+
+import mlflow
+from dataset import HCPDataset
+from models import GCN, SkipGCN
+from pytorchtools import seed_everything
+from train import reset_model, test_model, train_valid_model
+
+# Enable debug mode in PyTorch Geometric (optional)
+# set_debug(True)
+log = logging.getLogger(__name__)
 
 
-class HCPDataset(Dataset):
-    def __init__(self,
-                 cfg: DictConfig,
-                 rebuild_processed: bool = False,
-                 kind: str = 'train',
-                 transform: Optional[Callable] = None,
-                 pre_transform: Optional[Callable] = None,
-                 pre_filter: Optional[Callable] = None):
-        """
-        Инициализирует экземпляр класса HCPDataset.
+@hydra.main(version_base='1.3', config_path="../configs", config_name="config")
+def main(cfg: DictConfig) -> float:
+    """Main function to execute the training and evaluation pipeline.
 
-        Parameters
-        ----------
-        cfg : DictConfig
-            Объект конфигурации.
-        rebuild_processed : bool, default=False
-            Флаг, указывающий, нужно ли пересобрать обработанные данные.
-            По умолчанию False.
-        kind : str, {'train', 'valid', 'test'}, default='train'
-            Вид татасета, принимающий значения 'train', 'valid', 'test'
-            По умолчанию 'train'.
-        transform : Optional[Callable], default=None
-            Функция преобразования данных.
-            По умолчанию None.
-        pre_transform : Optional[Callable], default=None
-            Функция предварительного преобразования данных.
-            По умолчанию None.
-        pre_filter : (Optional[Callable], default=None
-            Функция фильтрации данных.
-            По умолчанию None.
+    Parameters
+    ----------
+    cfg : DictConfig
+        Configuration object containing all necessary parameters.
 
-        Returns
-        -------
-        None
-        """
-        self.cfg = cfg
-        self.kind = kind
-        # Проверяем, что есть каталоги для распаковки и создаем, если это необходимо
-        self.root = self.cfg.data.root_path
-        # Удаляем закешированные файлы, если требуется
-        # или если тип кодирования в конфиргурационном файле не совпадает с типом кодирования в
-        # распакованных файлах
-        root_path = Path(self.root)
-        proper_files = list(root_path.rglob(f'*{self.cfg.data.coding_type}*'))
-        if root_path.exists() and (rebuild_processed or not proper_files):
-            shutil.rmtree(root_path)
+    Returns
+    -------
+    float:
+        Validation accuracy, which is the metric to optimize during hyperparameter tuning.
+    """
 
-        super().__init__(self.root, transform, pre_transform, pre_filter)
+    # If bootstrap is enabled, update model parameters with the best parameters from a previous experiment
+    if 'make_bootstrap' in cfg.keys() and cfg.make_bootstrap:
+        config_df = pd.read_csv('configs/dataset_best_params.csv')
+        cfg.models.model.params['hidden_channels'] = \
+            config_df.query(f'dataset == "{cfg.data.dataset.root}"'
+                            f' and dataset_type == "{cfg.data.dataset_type}"')['hidden_channels'].to_list()[0]
+        cfg.models.model.params['dropout'] = \
+            config_df.query(f'dataset == "{cfg.data.dataset.root}"'
+                            f' and dataset_type == "{cfg.data.dataset_type}"')['dropout'].to_list()[0]
 
-    @property
-    def raw_paths(self) -> List[Path]:
-        """
-        Возвращает список путей к сырым данным.
+    # Fix the seed for reproducibility
+    seed_everything(cfg.models.random_state)
 
-        Returns
-        -------
-        List[Path]
-            Список путей к сырым данным, отсортированный для одинакового порядка при разных запусках.
-        """
-        if Path(self.raw_dir).exists():
-            # Сортируем список, чтобы был одинаковый порядок при разных запусках
-            return sorted(list(Path(self.raw_dir).glob(f'*{self.cfg.data.coding_type}*')))
-        return []
+    # Set the device to GPU if available, otherwise use CPU
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    ## For DEBUGGING (use CPU)
+    # device = torch.device('cpu')
 
-    @property
-    def raw_file_names(self) -> List[str]:
-        """
-        Возвращает список имен файлов в каталоге raw_dir.
+    # Prepare the training, validation, and test datasets
+    train_dataset = HCPDataset(cfg=cfg, kind='train').shuffle()
+    valid_dataset = HCPDataset(cfg=cfg, kind='valid').shuffle()
+    test_dataset = HCPDataset(cfg=cfg, kind='test').shuffle()
 
-        Если каталог raw_dir существует, возвращает отсортированный список имен файлов,
-        соответствующих типу кодирования self.cfg.data.coding_type.
-        В противном случае возвращает пустой список.
+    train_loader = DataLoader(train_dataset,
+                              batch_size=cfg.models.model.params['batch_size'],  # len(train_dataset),
+                              shuffle=False)
+    valid_loader = DataLoader(valid_dataset,
+                              batch_size=len(valid_dataset),
+                              shuffle=False)
+    test_loader = DataLoader(test_dataset,
+                             batch_size=len(test_dataset),
+                             shuffle=False)
 
-        Returns
-        -------
-        List[str]
-            Список имен файлов.
-        """
-        if not hasattr(self, 'raw_dir'):
-            return []
+    # Initialize the model with parameters from the configuration file
+    model = eval(f'{cfg.models.model.name}(model_params={cfg.models.model.params},'
+                 f'num_node_features={train_dataset.num_node_features})')
+    reset_model(model)  # Reinitialize the model
 
-        raw_dir = Path(self.raw_dir)
-        if not raw_dir.exists():
-            return []
+    # Move the model to the specified device (GPU or CPU)
+    model = model.to(device)
 
-        return sorted([f.name for f in raw_dir.glob(f'*{self.cfg.data.coding_type}*')])
+    # Define the loss function and optimizer
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=cfg.models.model['learning_rate'])
 
-    @property
-    def processed_file_names(self):
-        """
-        Возвращает список обработанных файлов, которые должны находиться в каталоге processed_dir.
-        Если файлы найдены, то обработка пропускается.
+    # Define the learning rate scheduler
+    scheduler = LinearLR(optimizer,
+                         start_factor=1,
+                         end_factor=0.1,
+                         total_iters=cfg.models['max_epochs'])
+    # scheduler = CyclicLR(optimizer,
+    #                      base_lr=0.0005,
+    #                      max_lr=0.05,
+    #                      step_size_up=10,
+    #                      mode="triangular2")
 
-        Returns
-        -------
-        List[str]
-            Список имен файлов в каталоге processed_dir, отсортированный для одинакового порядка при разных запусках.
-        """
-        if not hasattr(self, 'processed_dir'):
-            return []
+    # Set up MLflow for experiment tracking
+    mlflow.set_tracking_uri(uri=cfg.mlflow['tracking_uri'])  # type: ignore
+    mlflow.set_experiment(experiment_name=cfg.mlflow['experiment_name'])  # type: ignore
 
-        processed_dir = Path(self.processed_dir)
-        if not processed_dir.exists():
-            return []
+    # Define the run name for MLflow
+    run_name = f'seed={cfg.models.random_state}'
 
-        pattern = 'data_train*.pt'
-        if self.kind == 'valid':
-            pattern = 'data_valid*.pt'
-        elif self.kind == 'test':
-            pattern = 'data_test*.pt'
-        return sorted([f.name for f in processed_dir.glob(pattern)])
+    with mlflow.start_run(run_name=run_name):  # type: ignore
+        # Train and validate the model
+        valid_loss, valid_acc, valid_auc = train_valid_model(cfg=cfg,
+                                                             model=model,
+                                                             device=device,
+                                                             train_loader=train_loader,
+                                                             valid_loader=valid_loader,
+                                                             criterion=criterion,
+                                                             optimizer=optimizer,
+                                                             pooling_type=cfg.models.model.params['pooling_type'],
+                                                             scheduler=scheduler,
+                                                             mlflow_object=mlflow)
 
-    def download(self) -> None:
-        # Распаковываем архив, как есть d self.raw_dir
-        # self.raw_dir создается в родительском классе из self.root
-        shutil.unpack_archive(self.cfg.data.dataset.download_url, self.raw_dir)
-        # переносим файлы, которые подходят по типу кодирования
-        raw_path = Path(self.raw_dir)
-        for file in raw_path.rglob(f'*{self.cfg.data.coding_type}*'):
-            shutil.move(src=file, dst=raw_path)
-        # Ищем и удаляем каталог с ненужными файлами
-        for p in raw_path.iterdir():
-            if p.is_dir():
-                shutil.rmtree(p)
-        # Если корреляционные графы, то распаковываем данные для расчета средних по времени
-        if self.cfg.data.dataset_type == 'correlation_graphs':
-            shutil.unpack_archive(self.cfg.data.dataset.untouched_url, f'{self.root}/untouched')
+        # Prepare a dictionary for plotting (optional)
+        plot_dict = None
+        if cfg.mlflow['save_adjacency_matrices']:
+            plot_dict = {
+                'fname': cfg.mlflow['experiment_name'],
+                'processed_dir': f'{cfg.data["root_path"]}/processed',
+                'seed': cfg.models.random_state,
+                'max_elements': cfg.mlflow['max_elements'],
+                'palette_name': cfg.mlflow['palette_name'],
+                'dataset_type': cfg.data['dataset_type'],
+                'result_path': f'results/{cfg.mlflow["experiment_name"]}.txt',
+            }
 
-    def process(self) -> None:
-        for fpath in self.raw_paths:
-            # Разбиваем имя файла по символу "_"
-            # в предположении, что имя файла должно иметь вид: [id]_[coding_type]_[label]
-            # убираем пробелы в имени файла
-            try_list = [s.strip() for s in fpath.stem.split('_')]
-            label = self.cfg.data.dataset.labels[try_list[2]]
-            graph_id = try_list[0]
-            data = pd.read_csv(fpath, sep=self.cfg.data.sep)
-            # Если индексы ребер начинаются не с 0, то переиндексируем их
-            if data[self.cfg.data.edges_colnames[0]].min() != 0:
-                data.loc[:, self.cfg.data.edges_colnames] = data[self.cfg.data.edges_colnames] - 1
-            edge_indices = torch.tensor(data[self.cfg.data.edges_colnames].T.to_numpy(), dtype=torch.long)
-            edge_weights = torch.tensor(data[self.cfg.data.weights_colname].to_numpy(), dtype=torch.float)
-            num_of_nodes = pd.concat([data[self.cfg.data.edges_colnames[0]],
-                                      data[self.cfg.data.edges_colnames[1]]],
-                                     axis=0,
-                                     ignore_index=True).nunique()
-            # Указываем все единицы в качестве фичей на нодах
-            node_features = torch.tensor(np.ones(num_of_nodes).reshape(-1, 1), dtype=torch.float)
-            # Если корреляционные графы, то считаем средние по времени, как фичи вершин
-            if self.cfg.data.dataset_type == 'correlation_graphs':
-                features_data = \
-                    pd.read_csv(f'{self.root}/untouched/{self.cfg.data.dataset.root.upper()}/{"_".join(try_list)}.csv')
-                features_data = features_data.drop(columns=['Unnamed: 0']).mean(axis=1)
-                node_features = torch.tensor(features_data.to_numpy().reshape(-1, 1), dtype=torch.float)
-            data_to_save = Data(x=node_features,
-                                edge_index=edge_indices,
-                                edge_weight=edge_weights,
-                                y=label,
-                                graph_id=f'{graph_id}_{label}')
-            if self.kind == 'train' and int(graph_id) in self.cfg.data.train_ids:
-                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_train_{graph_id}_{label}.pt'))
-            elif self.kind == 'valid' and int(graph_id) in self.cfg.data.valid_ids:
-                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_valid_{graph_id}_{label}.pt'))
-            elif self.kind == 'test' and int(graph_id) in self.cfg.data.test_ids:
-                torch.save(data_to_save, os.path.join(self.processed_dir, f'data_test_{graph_id}_{label}.pt'))
-            else:
-                continue
+        # Test the model on the test dataset
+        test_model(model=model,
+                   device=device,
+                   test_loader=test_loader,
+                   criterion=criterion,
+                   pooling_type=cfg.models.model.params['pooling_type'],
+                   state_path=None,
+                   mlflow_object=mlflow,
+                   plot_dict=plot_dict)
 
-    def len(self):
-        return len(self.processed_file_names)
+    print('End!')
 
-    def get(self, idx):
-        return torch.load(
-            os.path.join(self.processed_dir, self.processed_file_names[idx])
-        )
+    # Return the validation accuracy as the metric to optimize during hyperparameter tuning
+    return valid_acc  # Mean accuracy on the validation dataset (maximize!!)
+
+
+if __name__ == "__main__":
+    main()

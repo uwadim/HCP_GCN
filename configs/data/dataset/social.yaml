@@ -1,18 +1,18 @@
-# Конфигурационный файл для датасета SOCIAL
+# Configuration file for the SOCIAL dataset
 
-# Путь, по которому расположен архив с датасетом
+# Path to the archive with the dataset
 download_url: '../HCP/${..dataset_type}/SOCIAL.zip'
 
-# Путь по которому расположен архив с исходными данными (до построения графа)
-# для добавления фичей вершин в корреляционные графы
+# Path to the archive with the original data (before building the graph)
+# for adding features to the vertices of the correlation graphs
 untouched_url: '../HCP/merged_contrast/SOCIAL.zip'
 
-# Название папки, в которую будем распаковывать архив с датасетом
+# Name of the folder to which we will unpack the archive with the dataset
 root: 'social'
 
-# Кодирование меток графа из названия файла
-# 1- соответствует искомому режиму
-# 0- соответствует фону
+# Encoding of graph labels from the file name
+# 1- corresponds to the desired mode
+# 0- corresponds to the background
 labels:
   'rnd': 1
   'mental': 0

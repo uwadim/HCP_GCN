@@ -1,12 +1,12 @@
-# # Конфигурационный файл, содержащий общие параметры для моделей
+# Configuration file containing general parameters for models
 
-# Устанавливаем начальное состояние для генерации случайных чисел
+# Set the initial state for generating random numbers
 random_state: 17
 
-# Количество эпох обучения
+# Number of training epochs
 max_epochs: 100
 
-# Ранний останов для контроля переобучения
+# Early stopping to control overfitting (not used for this work)
 stoping:
   # Number of epochs to wait of decreasing of test loss before early stop
   patience: 100

@@ -1,29 +1,30 @@
-#Конфигурационный файл, описывающий общие параметры для всех датасетов
+#Configuration file describing general parameters for all datasets
 
-# Тип датасета: Корреляционные или синолитические графы
-# Значение dataset_type должно быть равно названию папки, в которой находятся архивы
+# Dataset type: Correlation or synolytic graphs
+# The value of dataset_type must be equal to the name of the folder in which the archives are located
+# uncomment proper dataset_type
 # dataset_type: 'correlation_graphs'
 dataset_type: 'ensemble_graphs'
 
-# Путь к каталогу с датасетом относительно рабочего каталога программы
+# Path to the directory with the dataset relative to the program's working directory
 root_path: './data/${.dataset_type}/${data.dataset.root}'
 
-# Тип кодирования данных: LR или RL, входит в имена файлов из архивов
-# Для обучения/тестирования необходимо выбрать один тип кодирования
+# Data encoding type: LR or RL, included in file names from archives
+# For training/testing, you must select one encoding type (LR or RL)
 coding_type: 'RL'
 
-# Разделитель, использующийся CSV-файле
+# Separator used in CSV file
 sep: ','
 
-# Названия столбцов с индексами ребер
+# Column names with edge indices
 edges_colnames:
   - 'vertex1'  # from
   - 'vertex2'  # to
 
-# Название столбца с весами ребер
+# Name of the column with edge weights in the CSV file
 weights_colname: 'edge_weight'
 
-# Набор идентификаторов для обучения
+# identifiers for training
 train_ids:
   - 102109
   - 102614
@@ -96,7 +97,7 @@ train_ids:
   - 325129
   - 329844
 
-# Набор идентификаторов для подбора гиперпараметров
+# identifiers for hyperparameters tuning
 valid_ids:
   - 342129
   - 349244
@@ -119,7 +120,7 @@ valid_ids:
   - 541640
   - 558960
 
-# Набор идентификаторов для тестирования
+# identifiers for testing
 test_ids:
   - 634748
   - 654552

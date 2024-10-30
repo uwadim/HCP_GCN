@@ -1,18 +1,18 @@
-# Конфигурационный файл для датасета WM
+# Configuration file for WM dataset
 
-# Путь, по которому расположен архив с датасетом
+# Path to the archive with the dataset
 download_url: '../HCP/${..dataset_type}/WM.zip'
 
-# Путь по которому расположен архив с исходными данными (до построения графа)
-# для добавления фичей вершин в корреляционные графы
+# Path to the archive with the original data (before graph construction)
+# for adding vertex features to correlation graphs
 untouched_url: '../HCP/merged_contrast/WM.zip'
 
-# Название папки, в которую будем распаковывать архив с датасетом
+# Name of the folder to which we will unpack the archive with the dataset
 root: 'wm'
 
-# Кодирование меток графа из названия файла
-# 1- соответствует искомому режиму
-# 0- соответствует фону
+# Encoding of graph labels from the file name
+# 1- corresponds to the desired mode
+# 0- corresponds to the background
 labels:
   '2bk': 1
   '0bk': 0

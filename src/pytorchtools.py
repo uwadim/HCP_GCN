@@ -8,15 +8,14 @@ import torch_geometric
 
 def seed_everything(seed: int) -> None:
     """
-    Устанавливает начальное значение генераторов случайных чисел
-     для всех используемых библиотек.
+    Sets the seed for generating random numbers for all used libraries.
 
-    Параметры
+    Parameters
     ----------
     seed : int
-        Начальное значение для генерации случайных чисел.
+        The seed value for random number generation.
 
-    Возвращает
+    Returns
     -------
     None
     """
@@ -25,31 +24,33 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-        # При запуске на GPU c CuDNN эти 2 параметра должны быть установлены
+        # When running on GPU with CuDNN, these two parameters should be set
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    # Для hash seed
+    # For hash seed
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
 class EarlyStopping:
-    """Early stops the training if validation loss doesn't improve after a given patience.
-    original from https://github.com/Bjarten/early-stopping-pytorch
+    """
+    Early stops the training if validation loss doesn't improve after a given patience.
+    Original from https://github.com/Bjarten/early-stopping-pytorch
     """
 
     def __init__(self, patience=7, verbose=False, delta=0, path='checkpoint.pt', trace_func=print):
         """
-        Args:
-            patience (int): How long to wait after last time validation loss improved.
-                            Default: 7
-            verbose (bool): If True, prints a message for each validation loss improvement.
-                            Default: False
-            delta (float): Minimum change in the monitored quantity to qualify as an improvement.
-                            Default: 0
-            path (str): Path for the checkpoint to be saved to.
-                            Default: 'checkpoint.pt'
-            trace_func (function): trace print function.
-                            Default: print
+        Parameters
+        ----------
+        patience : int, default=7
+            How long to wait after the last time validation loss improved.
+        verbose : bool, default=False
+            If True, prints a message for each validation loss improvement.
+        delta : float, default=0
+            Minimum change in the monitored quantity to qualify as an improvement.
+        path : str, default='checkpoint.pt'
+            Path for the checkpoint to be saved to.
+        trace_func : function, default=print
+            Trace print function.
         """
         self.patience = patience
         self.verbose = verbose
@@ -62,7 +63,21 @@ class EarlyStopping:
         self.trace_func = trace_func
 
     def __call__(self, val_loss, model) -> int:
+        """
+        Checks if the validation loss has improved and updates the early stopping counter.
 
+        Parameters
+        ----------
+        val_loss : float
+            Current validation loss.
+        model : torch.nn.Module
+            The model to be saved if the validation loss improves.
+
+        Returns
+        -------
+        int
+            The current counter value.
+        """
         score = -val_loss
 
         if self.best_score is None:
@@ -81,7 +96,20 @@ class EarlyStopping:
         return self.counter
 
     def save_checkpoint(self, val_loss, model):
-        """Saves model when validation loss decrease."""
+        """
+        Saves the model when the validation loss decreases.
+
+        Parameters
+        ----------
+        val_loss : float
+            Current validation loss.
+        model : torch.nn.Module
+            The model to be saved.
+
+        Returns
+        -------
+        None
+        """
         if self.verbose:
             self.trace_func(
                 f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')

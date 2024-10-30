@@ -1,5 +1,5 @@
 # coding: utf-8
-""" training procedure """
+""" Training procedure """
 import random
 from typing import Any, List, Optional
 
@@ -9,8 +9,8 @@ import pandas as pd
 import seaborn as sns
 import torch  # type: ignore
 from omegaconf import DictConfig
-from sklearn.metrics import (accuracy_score, confusion_matrix,
-                             roc_auc_score, precision_recall_fscore_support)  # type: ignore
+from sklearn.metrics import (  # type: ignore
+    accuracy_score, confusion_matrix, precision_recall_fscore_support, roc_auc_score)
 from torch import sigmoid
 from torch_geometric.utils import to_dense_adj
 
@@ -22,33 +22,35 @@ def train_one_epoch(model,
                     device,
                     train_loader,
                     criterion, optimizer, pooling_type) -> float:  # type: ignore
-    """Make training for one epoch using all batches
+    """
+    Trains the model for one epoch using all batches.
 
     Parameters
     ----------
-    model
-    device
-    train_loader
-    criterion
-    optimizer
+    model : torch.nn.Module
+        The model to be trained.
+    device : torch.device
+        The device to be used for training (e.g., 'cuda' or 'cpu').
+    train_loader : torch.utils.data.DataLoader
+        DataLoader for the training dataset.
+    criterion : torch.nn.Module
+        Loss function.
+    optimizer : torch.optim.Optimizer
+        Optimizer for updating model parameters.
+    pooling_type : str
+        Type of pooling to be used.
 
     Returns
     -------
     float
-        loss for this epoch
+        Average loss for this epoch.
     """
     running_loss = 0.0
     step = 0
     model.train()
-    # for data_idx in train_loader.dataset._indices:
-    #     data = train_loader.dataset.get(data_idx)
     for data in train_loader:
         data.to(device)  # Use GPU
-        # ####### DEBUG for pytorch Dataset, not for PYG ########
-        # real_graph_indices = data.graph_index.detach().to('cpu').numpy() - data.ptr.detach().to('cpu').numpy()[:-1]
-        # ######################
-        # Reset gradients
-        optimizer.zero_grad()
+        optimizer.zero_grad()  # Reset gradients
         out = model(x=data.x,
                     edge_index=data.edge_index,
                     edge_weight=data.edge_weight,
@@ -70,6 +72,29 @@ def test_one_epoch(model,
                    criterion,
                    pooling_type,
                    calc_conf_matrix=False) -> tuple[float, ...]:
+    """
+    Tests the model for one epoch using all batches.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to be tested.
+    device : torch.device
+        The device to be used for testing (e.g., 'cuda' or 'cpu').
+    test_loader : torch.utils.data.DataLoader
+        DataLoader for the test dataset.
+    criterion : torch.nn.Module
+        Loss function.
+    pooling_type : str
+        Type of pooling to be used.
+    calc_conf_matrix : bool, default=False
+        Whether to calculate the confusion matrix.
+
+    Returns
+    -------
+    tuple[float, ...]
+        Average loss, average accuracy, average AUC, and optionally confusion matrix and other metrics.
+    """
     model.eval()
     running_loss = 0.0
     step = 0
@@ -81,9 +106,6 @@ def test_one_epoch(model,
 
     for data in test_loader:
         data.to(device)  # Use GPU
-        # ####### DEBUG for pytorch Dataset, not for PYG ########
-        # real_graph_indices = data.graph_index.detach().to('cpu').numpy() - data.ptr.detach().to('cpu').numpy()[:-1]
-        # ######################
         out = model(x=data.x,
                     edge_index=data.edge_index,
                     edge_weight=data.edge_weight,
@@ -108,9 +130,7 @@ def test_one_epoch(model,
         precision, recall, fscore, support = precision_recall_fscore_support(y_true=np.asarray(all_trues),
                                                                              y_pred=np.asarray(all_preds).ravel().round(),
                                                                              average=None)
-        # DataFrame для определения индексов элементов матрицы ошибок
         try_df = pd.DataFrame({'true': all_trues, 'diff': diff.astype(int).tolist(), 'graph_id': all_graph_ids})
-        # Индексы элементов матрицы ошибок для TP, TN, FP, FN
         tp_ids = try_df.query('true == 1 and diff == 0')['graph_id'].to_list()
         tn_ids = try_df.query('true == 0 and diff == 0')['graph_id'].to_list()
         fp_ids = try_df.query('diff == -1')['graph_id'].to_list()
@@ -134,7 +154,18 @@ def test_one_epoch(model,
 
 
 def reset_model(model):
-    # Reinitialize layers
+    """
+    Reinitializes the model's layers.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to be reinitialized.
+
+    Returns
+    -------
+    None
+    """
     for layer in model.children():
         if hasattr(layer, 'reset_parameters'):
             layer.reset_parameters()
@@ -149,38 +180,56 @@ def train_valid_model(cfg: DictConfig,
                       pooling_type,
                       scheduler,
                       mlflow_object: Optional[Any] = None) -> tuple[float, ...]:
+    """
+    Trains and validates the model for a specified number of epochs.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        Configuration object containing model and training parameters.
+    model : torch.nn.Module
+        The model to be trained.
+    device : torch.device
+        The device to be used for training (e.g., 'cuda' or 'cpu').
+    train_loader : torch.utils.data.DataLoader
+        DataLoader for the training dataset.
+    valid_loader : torch.utils.data.DataLoader
+        DataLoader for the validation dataset.
+    criterion : torch.nn.Module
+        Loss function.
+    optimizer : torch.optim.Optimizer
+        Optimizer for updating model parameters.
+    pooling_type : str
+        Type of pooling to be used.
+    scheduler : torch.optim.lr_scheduler._LRScheduler
+        Learning rate scheduler.
+    mlflow_object : Optional[Any], default=None
+        MLflow object for logging metrics and parameters.
+
+    Returns
+    -------
+    tuple[float, ...]
+        Validation loss, accuracy, and AUC.
+    """
     print("Start training ...")
-    # to track the average training loss per epoch as the model trains
     avg_train_losses = []
-    # to track the average validation loss per epoch as the model trains
     avg_valid_losses = []
 
-    # Количество эпох для обучения. В случае раннего останова - максимальное количество эпох
     n_epochs = cfg.models.max_epochs
-    # инициализируем как None, если ранний останов не используется
     early_stopping = None
-    # Если используем ранний останов, то инициализируем объект
     if cfg.models.model.early_stopping:
         early_stopping = EarlyStopping(**cfg.models.stoping)
     if mlflow_object is not None:
-        # log param
         log_params_from_omegaconf_dict(cfg)
     for epoch in range(1, n_epochs + 1):
-        ###################
-        # train the model #
-        ###################
         train_loss = train_one_epoch(model=model,
                                      device=device,
                                      train_loader=train_loader,
                                      criterion=criterion,
                                      optimizer=optimizer,
                                      pooling_type=pooling_type)
-        # record training loss
         avg_train_losses.append(train_loss)
 
-        ######################
-        # validate the model #
-        ######################
         (valid_loss,
          valid_acc,
          valid_auc) = test_one_epoch(model=model,
@@ -190,7 +239,7 @@ def train_valid_model(cfg: DictConfig,
                                      pooling_type=pooling_type,
                                      calc_conf_matrix=False)
         avg_valid_losses.append(valid_loss)
-        epoch_len = len(str(n_epochs))  # длина строки с количеством эпох (для выравнивания вывода)
+        epoch_len = len(str(n_epochs))
         if mlflow_object is not None:
             mlflow_object.log_metric('train loss', train_loss, step=epoch)
             mlflow_object.log_metric('valid loss', valid_loss, step=epoch)
@@ -201,8 +250,6 @@ def train_valid_model(cfg: DictConfig,
               f'train_loss: {train_loss:.5f} '
               f'valid_loss: {valid_loss:.5f} ')
 
-        # early_stopping needs the validation loss to check if it has decresed,
-        # and if it has, it will make a checkpoint of the current model
         if cfg.models.model.early_stopping:
             patience_counter = early_stopping(valid_loss, model)
 
@@ -216,7 +263,6 @@ def train_valid_model(cfg: DictConfig,
             mlflow_object.log_metric('learning rate', scheduler.get_last_lr()[0], step=epoch)
         scheduler.step()
 
-    # load the last checkpoint with the best model
     if cfg.models.model.early_stopping:
         model.load_state_dict(torch.load(cfg.training.stoping['path']))
     (train_loss,
@@ -293,7 +339,32 @@ def test_model(model,
                state_path: Optional[str] = None,
                mlflow_object: Optional[Any] = None,
                plot_dict: Optional[dict] = None):
-    # Загружаем сохраненную модель, если необходимо
+    """
+    Tests the model on the test dataset.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to be tested.
+    device : torch.device
+        The device to be used for testing (e.g., 'cuda' or 'cpu').
+    test_loader : torch.utils.data.DataLoader
+        DataLoader for the test dataset.
+    criterion : torch.nn.Module
+        Loss function.
+    pooling_type : str
+        Type of pooling to be used.
+    state_path : Optional[str], default=None
+        Path to the saved model state.
+    mlflow_object : Optional[Any], default=None
+        MLflow object for logging metrics and parameters.
+    plot_dict : Optional[dict], default=None
+        Dictionary containing plotting parameters.
+
+    Returns
+    -------
+    None
+    """
     if state_path is not None:
         model.load_state_dict(torch.load(state_path))
     (loss,
@@ -342,14 +413,9 @@ def test_model(model,
             random.seed(plot_dict['seed'])
             for ids, ids_name in zip([tp_ids, tn_ids, fp_ids, fn_ids], ['TP', 'TN', 'FP', 'FN']):
                 elements = random.sample(ids, min(len(ids), plot_dict['max_elements']))
-                # Создаем adjacency matrix из
                 for el in elements:
-                    # Загружаем граф
                     graph = torch.load(f'{plot_dict["processed_dir"]}/data_test_{el}.pt')
-                    # Создаем матрицу смежности (верхнюю диагональ, т.к. граф неориентированный)
-                    # берем нулевой элемент, т.к. получается тензор с первой размерностью = 1
                     adj = to_dense_adj(edge_index=graph.edge_index, edge_attr=graph.edge_weight)[0].numpy()
-                    # Добавляем нижнюю диагональ
                     adj = adj + adj.T - np.diag(np.diag(adj))
                     plot_adj_matrix(adj_matrix=adj,
                                     pic_name=f'{ids_name}_{plot_dict['fname']}_{el}.png',
@@ -365,6 +431,28 @@ def plot_adj_matrix(adj_matrix: np.ndarray,
                     kind: str,
                     dataset_type,
                     mlflow_object: Optional[Any] = None):
+    """
+    Plots the adjacency matrix and logs it to MLflow.
+
+    Parameters
+    ----------
+    adj_matrix : np.ndarray
+        The adjacency matrix to be plotted.
+    pic_name : str
+        Name of the picture file.
+    palette_name : str
+        Name of the color palette to be used.
+    kind : str
+        Type of the matrix (e.g., 'TP', 'TN', 'FP', 'FN').
+    dataset_type : str
+        Type of the dataset (e.g., 'correlation_graphs', 'ensemble_graphs').
+    mlflow_object : Optional[Any], default=None
+        MLflow object for logging metrics and parameters.
+
+    Returns
+    -------
+    None
+    """
     fig, ax = plt.subplots()
     if dataset_type == 'correlation_graphs':
         vmin = -6

@@ -1,20 +1,20 @@
-# Основной конфигурационный файл
+# Main configuration file
 
 mlflow:
-  # Название эксперимента для MLFlow: "название модели"_"тип датасета"_"название датасета"_"тип кодирования данных"
+  # Experiment name for MLFlow: "model name"_"dataset type"_"dataset name"_"data encoding type"
   experiment_name: '${models.model.name}_${data.dataset_type}_${data.dataset.root}_${data.coding_type}'
-  # Место сохранения БД MLFlow
+  # Path to MLFlow tracking DataBase file
   tracking_uri: 'sqlite:///${hydra:runtime.cwd}/mlflow/mlruns.db'
-  # Сохранять примеры матриц сопряженности
+  # Save examples of conjugacy matrices
   save_adjacency_matrices: True
-  # Брать количество элементов из max(len, max_elements)
-  # Если длина выборки больше max_elements, то семплировать max_elements случайными значениями
+  # Take the number of elements from max(len, max_elements)
+  # If the sample length is greater than max_elements, then sample max_elements with random values
   max_elements: 5
-  # Название палитры seaborn для отрисовки матриц смежности
+  # Name of seaborn palette for rendering adjacency matrices
   palette_name: 'coolwarm'
 
 
-# Запрещаем гидре менять рабочий каталог и создавать подкаталоги
+# We prohibit hydra from changing the working directory and creating subdirectories
 hydra:
   job:
     chdir: False

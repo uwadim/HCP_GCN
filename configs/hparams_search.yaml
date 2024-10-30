@@ -1,11 +1,11 @@
-# Конфигурационный файл для подбора гиперпараметров
-# Запускается вместо config.yaml
+# Configuration file for hyperparameter tuning
+# Run it instead of config.yaml
 mlflow:
-  # Название эксперимента для MLFlow: "название модели"_"тип датасета"_"название датасета"_"тип кодирования данных"
+  # Experiment name for MLFlow: "model name"_"dataset type"_"dataset name"_"data encoding type"
   experiment_name: '${models.model.name}_${data.dataset_type}_${data.dataset.root}_${data.coding_type}'
-  # Место сохранения БД MLFlow
+  # Path to MLFlow tracking DataBase file
   tracking_uri: 'sqlite:///${hydra:runtime.cwd}/mlflow/mlruns.db'
-  # Сохранять примеры матриц сопряженности
+  # Save examples of conjugacy matrices
   save_adjacency_matrices: False
 
 hydra:
@@ -14,7 +14,7 @@ hydra:
  sweeper:
    sampler:
      seed: ${models.random_state}
-   direction: maximize  # Максимизируем, т.к. оптимизируемся на метрике accuracy
+   direction: maximize  # We maximize, because we optimize on the accuracy metric
    study_name: main_acc
    storage: null
    n_trials: 40
@@ -22,6 +22,7 @@ hydra:
    params:
      models.model.params.hidden_channels: int(interval(8, 32))
      models.model.params.dropout: range(0.05, 0.6, step=0.05)
+# global_max_pool always give the best result, so we use it
 #     models.model.params.pooling_type: choice('global_max_pool', 'global_mean_pool')
 
 
@@ -32,7 +33,5 @@ defaults:
   - models: config
   - override hydra/sweeper: optuna
   - override hydra/sweeper/sampler: tpe
-  # Устанавливаем лаунчер joblib только, если готова папка processed (для первого прогона комментируем)
-  #- override hydra/launcher: joblib
   # Config from this file override the values of configs from the Defaults List
   - _self_
